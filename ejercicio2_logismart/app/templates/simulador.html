@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block titulo %}LogiSmart — Simulador de reglas{% endblock %}
+{% block encabezado %}<i class="bi bi-toggles me-1"></i>Simulador de tablas de verdad{% endblock %}
+
+{% block contenido %}
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-toggles me-1"></i>Interruptores (premisas en vivo)</div>
+      <div class="card-body vstack gap-3">
+        <div class="form-check form-switch switch-xl" id="sw-wrap"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><i class="bi bi-lightbulb me-1"></i>Salida en vivo</div>
+      <div class="card-body text-center">
+        <div class="semaforo my-1">
+          <div class="luz roja" id="luzR"></div><div class="luz amarilla" id="luzA"></div><div class="luz verde" id="luzV"></div>
+        </div>
+        <h5 id="txtDecision" class="mt-2">—</h5>
+        <div id="chips" class="mb-2"></div>
+        <ol id="pasos" class="pasos-logica text-start small"></ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-table me-1"></i>Tabla de verdad original — A = P∧S∧¬Q, E = P∧(R∨Q)</div>
+      <div class="table-responsive tabla-scroll" style="max-height:300px">
+        <table class="table table-sm table-striped text-center mb-0">
+          <thead><tr><th>P</th><th>Q</th><th>R</th><th>S</th><th>A</th><th>E</th><th>Decisión</th></tr></thead>
+          <tbody id="tbOriginal"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-header">Regla nueva H = R∧T <span class="badge text-bg-dark ms-1">nueva</span></div>
+          <div class="card-body small" id="justH"></div>
+          <table class="table table-sm text-center mb-0">
+            <thead><tr><th>R</th><th>T</th><th>H</th></tr></thead><tbody id="tbH"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-header">Regla nueva W = S∧V <span class="badge text-bg-dark ms-1">nueva</span></div>
+          <div class="card-body small" id="justW"></div>
+          <table class="table table-sm text-center mb-0">
+            <thead><tr><th>S</th><th>V</th><th>W</th></tr></thead><tbody id="tbW"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="card mt-3">
+      <div class="card-header"><i class="bi bi-diagram-3 me-1"></i>Análisis de redundancia y conflictos (reto opcional)</div>
+      <div class="card-body small" id="analisis">Cargando…</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const VARS = { P: 'Autorización previa', Q: 'Peso excede el límite', R: 'Materiales peligrosos',
+               S: 'Certificación vigente', T: 'Horario restringido', V: 'Certif. vence < 30 días' };
+const LUCES = { verde: 'luzV', amarillo: 'luzA', rojo: 'luzR' };
+const swWrap = document.getElementById('sw-wrap');
+const inputs = {};
+for (const [v, desc] of Object.entries(VARS)) {
+  const div = document.createElement('div');
+  div.className = 'form-check form-switch switch-xl';
+  div.innerHTML = `<input class="form-check-input" type="checkbox" id="sw_${v}">
+    <label class="form-check-label" for="sw_${v}"><b>${v}</b> — ${desc}</label>`;
+  swWrap.appendChild(div);
+  inputs[v] = div.querySelector('input');
+  inputs[v].addEventListener('change', evaluarVivo);
+}
+
+async function evaluarVivo() {
+  const body = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.checked]));
+  try {
+    const r = await api('/api/reglas/evaluar', { method: 'POST', body });
+    ['luzR','luzA','luzV'].forEach(id => document.getElementById(id).classList.remove('on'));
+    document.getElementById(LUCES[r.semaforo]).classList.add('on');
+    txtDecision.textContent = r.texto_decision;
+    chips.innerHTML = ['A','E','H','W'].map(x =>
+      `<span class="badge me-1 ${r[x] ? 'text-bg-dark' : 'text-bg-light text-muted'}">${x} ${r[x] ? 'V' : 'F'}</span>`).join('');
+    pasos.innerHTML = r.explicacion.map(p => `<li>${esc(p)}</li>`).join('');
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+function v(b) { return b ? '<b class="text-success">V</b>' : '<span class="text-danger">F</span>'; }
+
+async function cargarTablas() {
+  const d = await api('/api/reglas/tablas');
+  tbOriginal.innerHTML = d.original.map(f =>
+    `<tr><td>${v(f.P)}</td><td>${v(f.Q)}</td><td>${v(f.R)}</td><td>${v(f.S)}</td>
+     <td>${v(f.A)}</td><td>${v(f.E)}</td><td>${badgeDecision(f.decision)}</td></tr>`).join('');
+  tbH.innerHTML = d.H.map(f => `<tr><td>${v(f.R)}</td><td>${v(f.T)}</td><td>${v(f.H)}</td></tr>`).join('');
+  tbW.innerHTML = d.W.map(f => `<tr><td>${v(f.S)}</td><td>${v(f.V)}</td><td>${v(f.W)}</td></tr>`).join('');
+  justH.innerHTML = '<i class="bi bi-info-circle me-1"></i>' + esc(d.justificaciones.H);
+  justW.innerHTML = '<i class="bi bi-info-circle me-1"></i>' + esc(d.justificaciones.W);
+}
+
+async function cargarAnalisis() {
+  try {
+    const a = await api('/api/reglas/analisis');
+    analisis.innerHTML = `
+      <p class="mb-1"><b>${a.total_combinaciones}</b> combinaciones evaluadas. Distribución de decisiones:
+        ${Object.entries(a.por_decision).map(([k,v]) => `<span class="badge text-bg-light border me-1">${k}: ${v}</span>`).join('')}</p>
+      <p class="mb-1">Redundantes: ${a.redundantes.length ? a.redundantes.map(r => r.reglas.join(' = ')).join(', ') : '<b>ninguna</b> regla produce salidas idénticas a otra.'}</p>
+      <p class="mb-1">Solapamientos (conflicto potencial, resuelto por precedencia):</p>
+      <ul class="mb-1">${a.conflictos.map(c => `<li>${c.reglas.join(' ∧ ')}: ${c.casos} caso(s) — ${c.resolucion}</li>`).join('')}</ul>
+      <p class="text-muted mb-0">${esc(a.nota)}</p>`;
+  } catch (e) { analisis.textContent = 'No se pudo obtener el análisis.'; }
+}
+
+cargarTablas().catch(e => toast(e.message, 'danger'));
+cargarAnalisis();
+evaluarVivo();
+</script>
+{% endblock %}

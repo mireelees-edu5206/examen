@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block titulo %}LogiSmart — Matriz de riesgos éticos{% endblock %}
+{% block encabezado %}<i class="bi bi-shield-exclamation me-1"></i>Matriz de riesgos éticos{% endblock %}
+
+{% block contenido %}
+<div class="row g-3 mb-3" id="kNiveles"></div>
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-grid-3x3-gap me-1"></i>Matriz probabilidad × impacto (inherente)</div>
+      <div class="card-body table-responsive">
+        <table class="matriz-riesgo mx-auto"><tbody id="matriz"></tbody></table>
+        <div class="small text-muted text-center mt-2">El número en cada celda indica cuántos riesgos caen ahí. Pasa el cursor para verlos.</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><i class="bi bi-bar-chart me-1"></i>Riesgo inherente vs residual (tras mitigación)</div>
+      <div class="card-body"><canvas id="chResidual" height="220"></canvas></div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-list-ul me-1"></i>Riesgos registrados</span>
+        <button class="btn btn-sm btn-primary" id="btnNuevo"><i class="bi bi-plus-lg me-1"></i>Nuevo riesgo</button>
+      </div>
+      <div class="table-responsive tabla-scroll" style="max-height:560px">
+        <table class="table table-sm table-hover mb-0 align-middle">
+          <thead><tr><th>Módulo / riesgo</th><th>Categoría</th><th>P×I</th><th>Nivel</th><th>Residual</th><th></th></tr></thead>
+          <tbody id="tbRiesgos"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal alta/edición -->
+<div class="modal fade" id="modalRiesgo" tabindex="-1">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title" id="tituloModal">Nuevo riesgo</h5>
+      <button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="rId">
+      <div class="mb-2"><label class="form-label">Módulo</label><input id="rModulo" class="form-control" placeholder="Ej. Clasificador híbrido"></div>
+      <div class="mb-2"><label class="form-label">Descripción</label><textarea id="rDesc" class="form-control" rows="2"></textarea></div>
+      <div class="mb-2"><label class="form-label">Categoría</label>
+        <select id="rCat" class="form-select">
+          <option>sesgo</option><option>privacidad</option><option>transparencia</option>
+          <option>seguridad</option><option>responsabilidad</option><option>otro</option>
+        </select></div>
+      <div class="row mb-2">
+        <div class="col"><label class="form-label">Probabilidad <span id="lblP" class="badge text-bg-light">3</span></label>
+          <input type="range" class="form-range" id="rProb" min="1" max="5" value="3"></div>
+        <div class="col"><label class="form-label">Impacto <span id="lblI" class="badge text-bg-light">3</span></label>
+          <input type="range" class="form-range" id="rImp" min="1" max="5" value="3"></div>
+      </div>
+      <div class="mb-2"><label class="form-label">Mitigación</label><textarea id="rMit" class="form-control" rows="2"></textarea></div>
+      <div class="row">
+        <div class="col"><label class="form-label">Prob. residual <span id="lblPr" class="badge text-bg-light">2</span></label>
+          <input type="range" class="form-range" id="rProbR" min="1" max="5" value="2"></div>
+        <div class="col"><label class="form-label">Imp. residual <span id="lblIr" class="badge text-bg-light">2</span></label>
+          <input type="range" class="form-range" id="rImpR" min="1" max="5" value="2"></div>
+      </div>
+      <div class="small text-muted mt-2" id="puntajeVivo"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+      <button class="btn btn-primary" id="btnGuardar"><i class="bi bi-save me-1"></i>Guardar</button>
+    </div>
+  </div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+const modal = new bootstrap.Modal('#modalRiesgo');
+let chart = null, riesgos = [];
+
+const NIVEL = p => p >= 17 ? 'critico' : p >= 10 ? 'alto' : p >= 5 ? 'medio' : 'bajo';
+const CLASE = { critico: 'nivel-critico', alto: 'nivel-alto', medio: 'nivel-medio', bajo: 'nivel-bajo' };
+
+async function cargar() {
+  const d = await api('/api/riesgos/resumen');
+  riesgos = d.riesgos;
+  // KPIs por nivel
+  kNiveles.innerHTML = ['critico','alto','medio','bajo'].map(n =>
+    `<div class="col-6 col-md-3"><div class="card kpi-card"><div class="card-body text-center py-2">
+     <div class="fs-4 fw-bold">${d.por_nivel[n]}</div><div>${badgeNivel(n)}</div></div></div></div>`).join('');
+
+  // matriz 5x5 (impacto filas 5→1, probabilidad columnas 1→5)
+  let html = '<tr><th>I\\P</th>' + [1,2,3,4,5].map(p => `<th>${p}</th>`).join('') + '</tr>';
+  for (let i = 5; i >= 1; i--) {
+    html += `<tr><th>${i}</th>`;
+    for (let p = 1; p <= 5; p++) {
+      const celda = d.matriz.filter(m => m.probabilidad === p && m.impacto === i);
+      const puntaje = p * i;
+      const titulo = celda.map(m => m.modulo + ': ' + m.descripcion).join('\n');
+      html += `<td class="celda ${CLASE[NIVEL(puntaje)]}" title="${esc(titulo)}">${celda.length || ''}</td>`;
+    }
+    html += '</tr>';
+  }
+  matriz.innerHTML = html;
+
+  // gráfica inherente vs residual
+  if (chart) chart.destroy();
+  const etiq = riesgos.map((r, idx) => 'R' + (idx + 1));
+  chart = new Chart(chResidual, { type: 'bar',
+    data: { labels: etiq,
+      datasets: [
+        { label: 'Inherente', data: riesgos.map(r => r.puntaje), backgroundColor: '#ff8787' },
+        { label: 'Residual', data: riesgos.map(r => r.puntaje_residual || 0), backgroundColor: '#69db7c' }]},
+    options: { scales: { y: { beginAtZero: true, max: 25 } },
+      plugins: { tooltip: { callbacks: { title: i => riesgos[i[0].dataIndex].descripcion } } } } });
+
+  tbRiesgos.innerHTML = riesgos.map((r, idx) => `<tr>
+    <td class="small"><b>R${idx+1}</b> · ${esc(r.modulo)}<br>${esc(r.descripcion).slice(0, 80)}</td>
+    <td><span class="badge text-bg-light border">${esc(r.categoria)}</span></td>
+    <td>${r.probabilidad}×${r.impacto}=${r.puntaje}</td>
+    <td>${badgeNivel(r.nivel)}</td>
+    <td>${r.puntaje_residual ? badgeNivel(r.nivel_residual) + ' ' + r.puntaje_residual : '—'}</td>
+    <td class="text-nowrap">
+      <button class="btn btn-sm btn-outline-primary" onclick="editar(${idx})"><i class="bi bi-pencil"></i></button>
+      <button class="btn btn-sm btn-outline-danger" onclick="borrar('${r._id}')"><i class="bi bi-trash"></i></button>
+    </td></tr>`).join('');
+}
+
+function enlazarRangos() {
+  rProb.oninput = () => { lblP.textContent = rProb.value; puntaje(); };
+  rImp.oninput = () => { lblI.textContent = rImp.value; puntaje(); };
+  rProbR.oninput = () => { lblPr.textContent = rProbR.value; puntaje(); };
+  rImpR.oninput = () => { lblIr.textContent = rImpR.value; puntaje(); };
+}
+function puntaje() {
+  const pi = rProb.value * rImp.value, pr = rProbR.value * rImpR.value;
+  puntajeVivo.innerHTML = `Puntaje inherente: <b>${pi}</b> (${NIVEL(pi)}) · residual: <b>${pr}</b> (${NIVEL(pr)})`;
+}
+enlazarRangos();
+
+btnNuevo.addEventListener('click', () => {
+  tituloModal.textContent = 'Nuevo riesgo';
+  rId.value = ''; rModulo.value = ''; rDesc.value = ''; rCat.value = 'otro';
+  rProb.value = 3; rImp.value = 3; rProbR.value = 2; rImpR.value = 2; rMit.value = '';
+  lblP.textContent = 3; lblI.textContent = 3; lblPr.textContent = 2; lblIr.textContent = 2;
+  puntaje(); modal.show();
+});
+
+window.editar = (idx) => {
+  const r = riesgos[idx];
+  tituloModal.textContent = 'Editar riesgo';
+  rId.value = r._id; rModulo.value = r.modulo; rDesc.value = r.descripcion; rCat.value = r.categoria;
+  rProb.value = r.probabilidad; rImp.value = r.impacto;
+  rProbR.value = r.probabilidad_residual || 2; rImpR.value = r.impacto_residual || 2;
+  rMit.value = r.mitigacion || '';
+  lblP.textContent = r.probabilidad; lblI.textContent = r.impacto;
+  lblPr.textContent = rProbR.value; lblIr.textContent = rImpR.value;
+  puntaje(); modal.show();
+};
+
+window.borrar = async (id) => {
+  if (!confirm('¿Eliminar este riesgo?')) return;
+  try { await api('/api/riesgos/' + id, { method: 'DELETE' }); cargar(); }
+  catch (e) { toast(e.message, 'danger'); }
+};
+
+btnGuardar.addEventListener('click', async () => {
+  const body = { modulo: rModulo.value.trim(), descripcion: rDesc.value.trim(),
+    categoria: rCat.value, probabilidad: +rProb.value, impacto: +rImp.value,
+    mitigacion: rMit.value.trim(),
+    probabilidad_residual: +rProbR.value, impacto_residual: +rImpR.value };
+  if (!body.modulo || !body.descripcion) return toast('Módulo y descripción son obligatorios', 'warning');
+  try {
+    const id = rId.value;
+    await api('/api/riesgos' + (id ? '/' + id : ''), { method: id ? 'PUT' : 'POST', body });
+    modal.hide(); cargar(); toast('Riesgo guardado');
+  } catch (e) { toast(e.message, 'danger'); }
+});
+
+cargar().catch(e => toast(e.message, 'danger'));
+</script>
+{% endblock %}

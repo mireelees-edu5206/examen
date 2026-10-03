@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block titulo %}LogiSmart — Bandeja de incidentes{% endblock %}
+{% block encabezado %}<i class="bi bi-inbox me-1"></i>Bandeja de incidentes{% endblock %}
+
+{% block contenido %}
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-envelope-paper me-1"></i>Clasificar un correo</div>
+      <div class="card-body">
+        <input id="cRemitente" class="form-control mb-2" placeholder="remitente@planta.local" value="operador@planta.local">
+        <input id="cAsunto" class="form-control mb-2" placeholder="Asunto del correo">
+        <textarea id="cCuerpo" class="form-control mb-2" rows="5" placeholder="Pega aquí el cuerpo del correo…"></textarea>
+        <div class="d-flex gap-2 align-items-center">
+          <select id="cModo" class="form-select w-auto">
+            <option value="hibrido" selected>Híbrido (reglas + LLM)</option>
+            <option value="reglas">Solo reglas</option>
+            <option value="llm">Solo LLM</option>
+          </select>
+          <div class="form-check"><input class="form-check-input" type="checkbox" id="cGuardar" checked>
+            <label class="form-check-label" for="cGuardar">Guardar</label></div>
+          <button class="btn btn-primary ms-auto" id="btnClasificar"><i class="bi bi-magic me-1"></i>Clasificar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="cardResultado" style="display:none">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-tags me-1"></i>Resultado de la clasificación</span>
+        <span class="badge text-bg-light" id="rLatencia"></span>
+      </div>
+      <div class="card-body">
+        <div class="mb-2" id="rBadges"></div>
+        <div class="row g-2 mb-2">
+          <div class="col-6"><label class="form-label small mb-0">Categoría</label>
+            <select id="rCategoria" class="form-select form-select-sm"></select></div>
+          <div class="col-6"><label class="form-label small mb-0">Prioridad</label>
+            <select id="rPrioridad" class="form-select form-select-sm"></select></div>
+        </div>
+        <div class="small text-muted mb-1">Entidades extraídas</div>
+        <pre class="bg-light p-2 rounded small" id="rEntidades"></pre>
+        <div class="small text-muted mb-1">Resumen / detalle</div>
+        <div class="small" id="rDetalle"></div>
+        <button class="btn btn-outline-success btn-sm mt-2" id="btnGuardarEdicion">
+          <i class="bi bi-save me-1"></i>Guardar corrección</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header d-flex gap-2 align-items-center">
+        <span class="me-auto"><i class="bi bi-list-ul me-1"></i>Incidentes registrados</span>
+        <select id="fEstado" class="form-select form-select-sm w-auto">
+          <option value="">Todos los estados</option><option value="nuevo">nuevo</option>
+          <option value="en_atencion">en_atencion</option><option value="cerrado">cerrado</option>
+        </select>
+        <div class="form-check form-check-sm"><input class="form-check-input" type="checkbox" id="fRevision">
+          <label class="form-check-label" for="fRevision">Requieren revisión</label></div>
+        <button class="btn btn-sm btn-outline-secondary" id="btnRefrescar"><i class="bi bi-arrow-clockwise"></i></button>
+      </div>
+      <div class="table-responsive tabla-scroll">
+        <table class="table table-sm table-hover mb-0 align-middle">
+          <thead><tr><th>Fecha</th><th>Asunto</th><th>Categoría</th><th>Prioridad</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="tbIncidentes"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal detalle -->
+<div class="modal fade" id="modalInc" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title"><i class="bi bi-envelope-open me-1"></i>Detalle del incidente</h5>
+      <button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body" id="modalIncBody"></div>
+  </div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CATS = ['materiales_peligrosos','sobrepeso','acceso_no_autorizado','falla_hardware','falla_software','somnolencia_conductor','otro'];
+const PRIS = ['baja','media','alta','critica'];
+const modalInc = new bootstrap.Modal('#modalInc');
+let incActual = null;
+
+rCategoria.innerHTML = CATS.map(c => `<option>${c}</option>`).join('');
+rPrioridad.innerHTML = PRIS.map(p => `<option>${p}</option>`).join('');
+
+btnClasificar.addEventListener('click', async () => {
+  if (!cCuerpo.value.trim()) return toast('Escribe el cuerpo del correo', 'warning');
+  spinnerBtn(btnClasificar, true, 'Clasificando… (el LLM puede tardar)');
+  try {
+    const r = await api('/api/incidentes/clasificar', { method: 'POST', body: {
+      remitente: cRemitente.value, asunto: cAsunto.value, cuerpo: cCuerpo.value,
+      modo: cModo.value, guardar: cGuardar.checked } });
+    cardResultado.style.display = '';
+    incActual = r.incidente || null;
+    rCategoria.value = r.categoria; rPrioridad.value = r.prioridad;
+    rLatencia.textContent = r.latencia_ms + ' ms · ' + r.fuente;
+    rBadges.innerHTML = badgePrioridad(r.prioridad) +
+      (r.requiere_revision_humana ? ' <span class="badge text-bg-danger"><i class="bi bi-person-check"></i> requiere revisión humana</span>' : '') +
+      (r.detalle ? ` <span class="badge text-bg-light">reglas: ${r.detalle.reglas.categoria}/${r.detalle.reglas.prioridad}` +
+        (r.detalle.llm ? ` · llm: ${r.detalle.llm.categoria}/${r.detalle.llm.prioridad}` : ' · llm: no disponible') + '</span>' : '');
+    rEntidades.textContent = JSON.stringify(r.entidades, null, 2);
+    rDetalle.innerHTML = (r.resumen ? `<p class="mb-1"><i>${esc(r.resumen)}</i></p>` : '') +
+      (r.palabras_clave && r.palabras_clave.length ? `<div>Palabras clave: ${r.palabras_clave.map(esc).join(', ')}</div>` : '') +
+      (r.error_llm ? `<div class="text-warning small">LLM: ${esc(r.error_llm)}</div>` : '');
+    btnGuardarEdicion.style.display = incActual ? '' : 'none';
+    if (incActual) cargarTabla();
+    toast('Clasificado por: ' + r.fuente);
+  } catch (e) { toast(e.message, 'danger'); }
+  finally { spinnerBtn(btnClasificar, false); }
+});
+
+btnGuardarEdicion.addEventListener('click', async () => {
+  if (!incActual) return;
+  try {
+    await api('/api/incidentes/' + incActual._id, { method: 'PUT',
+      body: { categoria: rCategoria.value, prioridad: rPrioridad.value } });
+    toast('Corrección guardada'); cargarTabla();
+  } catch (e) { toast(e.message, 'danger'); }
+});
+
+async function cargarTabla() {
+  const p = new URLSearchParams();
+  if (fEstado.value) p.set('estado', fEstado.value);
+  if (fRevision.checked) p.set('revision', '1');
+  const docs = await api('/api/incidentes?' + p);
+  tbIncidentes.innerHTML = docs.map(d => `<tr>
+    <td class="small">${fmtFecha(d.timestamp)}</td>
+    <td class="small">${esc(d.asunto || '(sin asunto)').slice(0, 42)}
+      ${d.requiere_revision_humana ? '<i class="bi bi-exclamation-triangle text-danger" title="requiere revisión humana"></i>' : ''}</td>
+    <td><span class="badge text-bg-light border">${esc(d.clasificacion?.categoria || '—')}</span></td>
+    <td>${badgePrioridad(d.clasificacion?.prioridad)}</td>
+    <td>
+      <select class="form-select form-select-sm w-auto" onchange="cambiarEstado('${d._id}', this.value)">
+        ${['nuevo','en_atencion','cerrado'].map(e => `<option ${e === d.estado ? 'selected' : ''}>${e}</option>`).join('')}
+      </select></td>
+    <td class="text-nowrap">
+      <button class="btn btn-sm btn-outline-info" onclick="verDetalle('${d._id}')"><i class="bi bi-eye"></i></button>
+      <button class="btn btn-sm btn-outline-danger" onclick="borrar('${d._id}')"><i class="bi bi-trash"></i></button>
+    </td></tr>`).join('')
+    || '<tr><td colspan="6" class="text-center text-muted">Sin incidentes</td></tr>';
+}
+
+window.cambiarEstado = async (id, estado) => {
+  try { await api('/api/incidentes/' + id, { method: 'PUT', body: { estado } });
+        toast('Estado actualizado'); } catch (e) { toast(e.message, 'danger'); }
+};
+window.borrar = async (id) => {
+  if (!confirm('¿Eliminar este incidente?')) return;
+  try { await api('/api/incidentes/' + id, { method: 'DELETE' }); cargarTabla(); }
+  catch (e) { toast(e.message, 'danger'); }
+};
+window.verDetalle = async (id) => {
+  const d = await api('/api/incidentes/' + id);
+  modalIncBody.innerHTML = `
+    <p><b>De:</b> ${esc(d.remitente)} &nbsp; <b>Fecha:</b> ${fmtFecha(d.timestamp)}</p>
+    <p><b>Asunto:</b> ${esc(d.asunto)}</p>
+    <pre class="bg-light p-2 rounded small" style="white-space:pre-wrap">${esc(d.cuerpo)}</pre>
+    <p>Clasificación: <span class="badge text-bg-light border">${esc(d.clasificacion?.categoria)}</span>
+       ${badgePrioridad(d.clasificacion?.prioridad)} por ${esc(d.clasificacion?.fuente || '?')}</p>
+    <p>Entidades: <code>${esc(JSON.stringify(d.datos_extraidos))}</code></p>
+    <p class="mb-1"><b>Historial:</b></p>
+    <ul class="small">${(d.historial || []).map(h => `<li>${fmtFecha(h.ts)} — ${esc(h.evento)}</li>`).join('')}</ul>`;
+  modalInc.show();
+};
+
+fEstado.addEventListener('change', cargarTabla);
+fRevision.addEventListener('change', cargarTabla);
+btnRefrescar.addEventListener('click', cargarTabla);
+cargarTabla().catch(e => toast(e.message, 'danger'));
+</script>
+{% endblock %}

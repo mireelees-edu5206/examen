@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block titulo %}LogiSmart — Panel de control{% endblock %}
+{% block encabezado %}<i class="bi bi-speedometer2 me-1"></i>Panel de control{% endblock %}
+
+{% block contenido %}
+<div class="row g-3 mb-2">
+  <div class="col-auto">
+    <label class="form-label small mb-1">Desde</label>
+    <input type="date" id="fDesde" class="form-control form-control-sm">
+  </div>
+  <div class="col-auto">
+    <label class="form-label small mb-1">Hasta</label>
+    <input type="date" id="fHasta" class="form-control form-control-sm">
+  </div>
+  <div class="col-auto d-flex align-items-end gap-2">
+    <button class="btn btn-sm btn-primary" id="btnFiltrar"><i class="bi bi-funnel"></i> Filtrar</button>
+    <button class="btn btn-sm btn-outline-secondary" id="btnLimpiar">Limpiar</button>
+  </div>
+</div>
+
+<div class="row g-3 mb-3" id="kpis">
+  <div class="col-md-3 col-6">
+    <div class="card kpi-card"><div class="card-body d-flex align-items-center gap-3">
+      <div class="icono text-bg-primary"><i class="bi bi-truck"></i></div>
+      <div><div class="fs-3 fw-bold" id="kCamiones">–</div><div class="text-muted small">Camiones atendidos</div></div>
+    </div></div>
+  </div>
+  <div class="col-md-3 col-6">
+    <div class="card kpi-card"><div class="card-body d-flex align-items-center gap-3">
+      <div class="icono text-bg-warning"><i class="bi bi-inbox"></i></div>
+      <div><div class="fs-3 fw-bold" id="kIncAbiertos">–</div><div class="text-muted small">Incidentes abiertos</div></div>
+    </div></div>
+  </div>
+  <div class="col-md-3 col-6">
+    <div class="card kpi-card"><div class="card-body d-flex align-items-center gap-3">
+      <div class="icono text-bg-danger"><i class="bi bi-shield-exclamation"></i></div>
+      <div><div class="fs-3 fw-bold" id="kRiesgos">–</div><div class="text-muted small">Riesgos críticos</div></div>
+    </div></div>
+  </div>
+  <div class="col-md-3 col-6">
+    <div class="card kpi-card"><div class="card-body d-flex align-items-center gap-3">
+      <div class="icono text-bg-success"><i class="bi bi-database"></i></div>
+      <div><div class="fs-3 fw-bold" id="kRegistrados">–</div><div class="text-muted small">Camiones registrados</div></div>
+    </div></div>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-4">
+    <div class="card h-100"><div class="card-header"><i class="bi bi-bar-chart me-1"></i>Accesos por decisión</div>
+      <div class="card-body"><canvas id="chAccesos"></canvas></div></div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card h-100"><div class="card-header"><i class="bi bi-pie-chart me-1"></i>Incidentes por categoría</div>
+      <div class="card-body"><canvas id="chCategorias"></canvas></div></div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card h-100"><div class="card-header"><i class="bi bi-graph-up me-1"></i>Incidentes por semana y categoría</div>
+      <div class="card-body"><canvas id="chSemana"></canvas></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between">
+    <span><i class="bi bi-clock-history me-1"></i>Últimos accesos</span>
+    <a href="/acceso" class="btn btn-sm btn-outline-primary">Ir al control de acceso</a>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover mb-0 align-middle">
+      <thead><tr><th>Fecha</th><th>Camión</th><th>Placa</th><th>P Q R S T V</th><th>Decisión</th><th>Operador</th></tr></thead>
+      <tbody id="tbAccesos"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+let charts = {};
+function destruir(nombre){ if (charts[nombre]) { charts[nombre].destroy(); } }
+
+async function cargar() {
+  const params = new URLSearchParams();
+  if (fDesde.value) params.set('desde', fDesde.value);
+  if (fHasta.value) params.set('hasta', fHasta.value);
+  const d = await api('/api/dashboard?' + params);
+
+  kCamiones.textContent = d.kpis.camiones_atendidos;
+  kIncAbiertos.textContent = d.kpis.incidentes_abiertos;
+  kRiesgos.textContent = d.kpis.riesgos_criticos;
+  kRegistrados.textContent = d.kpis.camiones_registrados;
+
+  // --- accesos por decisión
+  const ad = d.graficas.accesos_decision;
+  destruir('a');
+  charts.a = new Chart(chAccesos, { type: 'bar',
+    data: { labels: Object.keys(ad).map(k => ({acceso_estandar:'Estándar',inspeccion_especial:'Inspección',retenido_horario:'Retenido',denegado:'Denegado'}[k]||k)),
+      datasets: [{ data: Object.values(ad),
+        backgroundColor: ['#28d17c','#ffc107','#343a40','#ff5252'] }]},
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } } });
+
+  // --- incidentes por categoría
+  const ic = d.graficas.incidentes_categoria;
+  destruir('c');
+  charts.c = new Chart(chCategorias, { type: 'doughnut',
+    data: { labels: Object.keys(ic),
+      datasets: [{ data: Object.values(ic),
+        backgroundColor: ['#ff5252','#ffc107','#0d6efd','#6f42c1','#20c997','#fd7e14','#adb5bd'] }]},
+    options: { plugins: { legend: { position: 'bottom' } } } });
+
+  // --- incidentes por semana y categoría (agregación Mongo)
+  const sem = d.graficas.incidentes_semana;
+  const semanas = [...new Set(sem.map(x => 'S' + String(x.semana).padStart(2,'0')))];
+  const cats = [...new Set(sem.map(x => x.categoria))];
+  const paleta = ['#ff5252','#ffc107','#0d6efd','#6f42c1','#20c997','#fd7e14','#adb5bd'];
+  destruir('s');
+  charts.s = new Chart(chSemana, { type: 'bar',
+    data: { labels: semanas,
+      datasets: cats.map((c,i) => ({ label: c, backgroundColor: paleta[i % paleta.length],
+        data: semanas.map((_,si) => {
+          const semNum = +semanas[si].slice(1);
+          const reg = sem.find(x => x.categoria === c && x.semana === semNum);
+          return reg ? reg.total : 0; }) })) },
+    options: { scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } },
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } } } });
+
+  // --- últimos accesos
+  tbAccesos.innerHTML = d.ultimos_accesos.map(a => `<tr>
+    <td>${fmtFecha(a.timestamp)}</td><td>${esc(a.camion_id || '—')}</td><td>${esc(a.placa || '—')}</td>
+    <td class="font-monospace small">${['P','Q','R','S','T','V'].map(k => a[k] ? '<b>'+k+'</b>' : '<span class="text-muted">'+k+'</span>').join(' ')}</td>
+    <td>${badgeDecision(a.decision)}</td><td>${esc(a.operador || '—')}</td></tr>`).join('')
+    || '<tr><td colspan="6" class="text-center text-muted">Sin accesos en el periodo</td></tr>';
+}
+
+btnFiltrar.addEventListener('click', cargar);
+btnLimpiar.addEventListener('click', () => { fDesde.value = ''; fHasta.value = ''; cargar(); });
+cargar().catch(e => toast(e.message, 'danger'));
+</script>
+{% endblock %}

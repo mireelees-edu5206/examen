@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block titulo %}LogiSmart — Reportes{% endblock %}
+{% block encabezado %}<i class="bi bi-file-earmark-arrow-down me-1"></i>Exportar reportes{% endblock %}
+
+{% block contenido %}
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-table me-1"></i>Exportar colecciones</div>
+      <div class="table-responsive">
+        <table class="table mb-0 align-middle">
+          <thead><tr><th>Colección</th><th>Descripción</th><th class="text-end">Exportar</th></tr></thead>
+          <tbody id="tbReportes"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-info-circle me-1"></i>Notas</div>
+      <div class="card-body small">
+        <p><b>CSV/JSON</b> se generan en el servidor directamente desde la base de datos.</p>
+        <p><b>PDF</b> se compone en el navegador con jsPDF a partir de los mismos datos, con fecha de generación.</p>
+        <p class="mb-0">La colección <code>evaluaciones_llm</code> incluye las corridas del experimento de clasificación.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<script>
+const COLECCIONES = [
+  { nombre: 'accesos', desc: 'Bitácora de accesos con premisas, decisión y explicación' },
+  { nombre: 'incidentes', desc: 'Correos clasificados con estado e historial' },
+  { nombre: 'camiones', desc: 'Flota registrada con autorización y certificación' },
+  { nombre: 'riesgos_eticos', desc: 'Matriz de riesgos con mitigación y residual' },
+  { nombre: 'evaluaciones_llm', desc: 'Corridas del experimento de clasificación' },
+];
+
+tbReportes.innerHTML = COLECCIONES.map(c => `<tr>
+  <td><code>${c.nombre}</code></td><td class="small">${c.desc}</td>
+  <td class="text-end text-nowrap">
+    <a class="btn btn-sm btn-outline-success" href="/api/reportes/${c.nombre}/csv"><i class="bi bi-filetype-csv"></i> CSV</a>
+    <a class="btn btn-sm btn-outline-primary" href="/api/reportes/${c.nombre}/json"><i class="bi bi-filetype-json"></i> JSON</a>
+    <button class="btn btn-sm btn-outline-danger" onclick="pdf('${c.nombre}')"><i class="bi bi-filetype-pdf"></i> PDF</button>
+  </td></tr>`).join('');
+
+window.pdf = async (col) => {
+  try {
+    const d = await api('/api/reportes/' + col + '/datos');
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape' });
+    doc.setFontSize(14);
+    doc.text('LogiSmart — reporte de ' + col, 14, 14);
+    doc.setFontSize(9);
+    doc.text('Generado: ' + new Date().toLocaleString('es-MX') + ' · registros: ' + d.datos.length, 14, 20);
+    const filas = d.datos.map(x => Object.entries(x)
+      .filter(([k]) => !['explicacion', 'cuerpo', 'historial', 'respuesta', 'detalle', 'datos_extraidos'].includes(k))
+      .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n'));
+    doc.autoTable({
+      startY: 26,
+      head: [['#', 'Registro (campos principales)']],
+      body: filas.map((f, i) => [i + 1, f]),
+      styles: { fontSize: 7, cellWidth: 'wrap' },
+      columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 260 } },
+    });
+    doc.save(`logismart_${col}.pdf`);
+  } catch (e) { toast(e.message, 'danger'); }
+};
+</script>
+{% endblock %}

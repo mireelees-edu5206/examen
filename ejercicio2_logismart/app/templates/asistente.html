@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block titulo %}LogiSmart — Asistente explicativo{% endblock %}
+{% block encabezado %}<i class="bi bi-robot me-1"></i>Asistente explicativo (RAG sobre MongoDB){% endblock %}
+
+{% block contenido %}
+<div class="row justify-content-center">
+  <div class="col-lg-9">
+    <div class="alert alert-info py-2 small">
+      <i class="bi bi-info-circle me-1"></i>
+      El asistente solo responde con datos recuperados de la base de datos y cita el registro de origen.
+      Prueba: <i>«¿por qué CAM-102 fue enviado a inspección?»</i>, <i>«¿cuántos incidentes abiertos hay?»</i>,
+      <i>«muéstrame los riesgos críticos»</i>.
+    </div>
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-chat-dots me-1"></i>Conversación</span>
+        <button class="btn btn-sm btn-outline-danger" id="btnLimpiar"><i class="bi bi-trash me-1"></i>Limpiar</button>
+      </div>
+      <div class="card-body chat-scroll" id="chatBox"></div>
+      <div class="card-footer">
+        <form id="formPregunta" class="input-group">
+          <input id="txtPregunta" class="form-control" maxlength="2000" autocomplete="off"
+                 placeholder="Pregunta sobre camiones, accesos, incidentes o riesgos…" required>
+          <button class="btn btn-primary" id="btnEnviar"><i class="bi bi-send"></i> Preguntar</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function agregarMsg(texto, tipo, extra = '') {
+  const fila = document.createElement('div');
+  fila.className = 'd-flex mb-2 ' + (tipo === 'msg-user' ? 'justify-content-end' : '');
+  const div = document.createElement('div');
+  div.className = 'msg ' + tipo;
+  div.textContent = texto;
+  if (extra) div.insertAdjacentHTML('beforeend', extra);
+  fila.appendChild(div);
+  chatBox.appendChild(fila);
+  chatBox.scrollTop = chatBox.scrollHeight;
+  return div;
+}
+
+function htmlFuentes(fuentes, modo) {
+  if (!fuentes || !fuentes.length) return '';
+  return `<div class="fuentes mt-2 pt-2 border-top">
+    <span class="badge text-bg-light me-1"><i class="bi bi-link-45deg"></i>${modo === 'llm' ? 'fuentes consultadas' : 'registros'}</span>` +
+    fuentes.map(f => `<span class="badge text-bg-secondary fuente-chip" title="${esc(f.resumen)}">${esc(f.coleccion)}#${esc(String(f.id).slice(-6))}</span>`).join(' ') + '</div>';
+}
+
+formPregunta.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pregunta = txtPregunta.value.trim();
+  if (!pregunta) return;
+  txtPregunta.value = '';
+  agregarMsg(pregunta, 'msg-user');
+  const t = agregarMsg('Consultando la base de datos y el LLM…', 'msg-bot');
+  spinnerBtn(btnEnviar, true);
+  try {
+    const r = await api('/api/asistente/preguntar', { method: 'POST', body: { pregunta } });
+    t.textContent = r.respuesta;
+    t.insertAdjacentHTML('beforeend', htmlFuentes(r.fuentes, r.modo));
+  } catch (err) {
+    t.textContent = 'Error: ' + err.message;
+  } finally {
+    spinnerBtn(btnEnviar, false);
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+});
+
+async function cargarHistorial() {
+  try {
+    const docs = await api('/api/asistente/historial');
+    for (const d of docs) {
+      agregarMsg(d.pregunta, 'msg-user');
+      agregarMsg(d.respuesta, 'msg-bot', htmlFuentes(d.fuentes, d.modo));
+    }
+  } catch (e) {}
+}
+
+btnLimpiar.addEventListener('click', async () => {
+  await api('/api/asistente/historial', { method: 'DELETE' });
+  chatBox.innerHTML = '';
+});
+cargarHistorial();
+</script>
+{% endblock %}

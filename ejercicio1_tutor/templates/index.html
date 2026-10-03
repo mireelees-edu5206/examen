@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NutriChef — Tutor inteligente con LLM</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <style>
+    body { background: #f4f6f9; }
+    .chat-card { height: 70vh; }
+    #chatBox { overflow-y: auto; }
+    .msg { max-width: 80%; padding: .65rem .9rem; border-radius: 1rem; white-space: pre-wrap; }
+    .msg-user { background: #0d6efd; color: #fff; margin-left: auto; border-bottom-right-radius: .25rem; }
+    .msg-bot  { background: #fff; border: 1px solid #e3e6ea; border-bottom-left-radius: .25rem; }
+    .msg-sys  { background: #fff3cd; border: 1px solid #ffecb5; font-size: .9rem; }
+    .typing span { animation: blink 1.2s infinite; }
+    .typing span:nth-child(2){ animation-delay:.2s } .typing span:nth-child(3){ animation-delay:.4s }
+    @keyframes blink { 0%,60%,100%{opacity:.25} 30%{opacity:1} }
+  </style>
+</head>
+<body>
+<nav class="navbar navbar-dark bg-success shadow-sm">
+  <div class="container">
+    <span class="navbar-brand"><i class="bi bi-egg-fried me-2"></i>NutriChef <small class="fw-light">tutor de cocina saludable</small></span>
+    <span class="badge text-bg-light" id="badgeModelo"><i class="bi bi-cpu"></i> {{ modelo }}</span>
+  </div>
+</nav>
+
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+
+      <div id="alertaOllama" class="alert alert-warning d-none">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        No se detecta Ollama. Inicia el servicio (<code>ollama serve</code>) y recarga la página.
+      </div>
+
+      <div class="card shadow-sm chat-card d-flex flex-column">
+        <div class="card-header d-flex gap-2 align-items-center bg-white">
+          <strong class="me-auto"><i class="bi bi-chat-dots me-1"></i>Conversación</strong>
+          <button class="btn btn-outline-secondary btn-sm" id="btnResumen">
+            <i class="bi bi-card-list me-1"></i>Resumen del historial
+          </button>
+          <button class="btn btn-outline-danger btn-sm" id="btnReiniciar">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Reiniciar
+          </button>
+        </div>
+
+        <div class="card-body" id="chatBox">
+          <div class="d-flex mb-2">
+            <div class="msg msg-sys">
+              <i class="bi bi-info-circle me-1"></i>
+              Hola, soy <b>NutriChef</b>. Pregúntame por recetas saludables, sustitutos
+              de ingredientes o ideas de menú. Ej.: <i>"¿Qué puedo cenar rápido y con proteína?"</i>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-footer bg-white">
+          <form id="formChat" class="input-group">
+            <input type="text" id="txtMsg" class="form-control" maxlength="4000"
+                   placeholder="Escribe tu pregunta de cocina…" autocomplete="off" required>
+            <button class="btn btn-success" type="submit" id="btnEnviar">
+              <i class="bi bi-send"></i> Enviar
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <p class="text-muted small mt-2 mb-0">
+        <i class="bi bi-shield-check me-1"></i>
+        El resumen lo genera el propio modelo a partir del historial de esta sesión.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- Modal resumen -->
+<div class="modal fade" id="modalResumen" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-card-list me-1"></i>Resumen de tu historial</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="cuerpoResumen" style="white-space:pre-wrap"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const chatBox = document.getElementById('chatBox');
+const form = document.getElementById('formChat');
+const txt = document.getElementById('txtMsg');
+const modalResumen = new bootstrap.Modal('#modalResumen');
+
+function burbuja(texto, tipo) {
+  const fila = document.createElement('div');
+  fila.className = 'd-flex mb-2';
+  const div = document.createElement('div');
+  div.className = 'msg ' + tipo;
+  div.textContent = texto;
+  fila.appendChild(div);
+  chatBox.appendChild(fila);
+  chatBox.scrollTop = chatBox.scrollHeight;
+  return div;
+}
+
+function indicadorEscritura() {
+  const d = burbuja('', 'msg-bot typing');
+  d.innerHTML = '<span>●</span><span>●</span><span>●</span>';
+  return d.parentElement;
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const mensaje = txt.value.trim();
+  if (!mensaje) return;
+  txt.value = '';
+  burbuja(mensaje, 'msg-user');
+  const typing = indicadorEscritura();
+  document.getElementById('btnEnviar').disabled = true;
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({mensaje})
+    });
+    const data = await r.json();
+    typing.remove();
+    if (data.error) burbuja('⚠ ' + data.error, 'msg-sys');
+    else burbuja(data.respuesta, 'msg-bot');
+  } catch (err) {
+    typing.remove();
+    burbuja('⚠ Error de red al contactar el servidor.', 'msg-sys');
+  } finally {
+    document.getElementById('btnEnviar').disabled = false;
+    txt.focus();
+  }
+});
+
+document.getElementById('btnResumen').addEventListener('click', async () => {
+  document.getElementById('cuerpoResumen').textContent = 'Generando resumen…';
+  modalResumen.show();
+  try {
+    const r = await fetch('/api/resumen', {method:'POST'});
+    const data = await r.json();
+    document.getElementById('cuerpoResumen').textContent = data.resumen || data.error || 'Sin respuesta.';
+  } catch {
+    document.getElementById('cuerpoResumen').textContent = 'Error al solicitar el resumen.';
+  }
+});
+
+document.getElementById('btnReiniciar').addEventListener('click', async () => {
+  await fetch('/api/reiniciar', {method:'POST'});
+  location.reload();
+});
+
+// Estado de Ollama al cargar
+fetch('/api/estado').then(r=>r.json()).then(d=>{
+  if (!d.ollama) document.getElementById('alertaOllama').classList.remove('d-none');
+  else document.getElementById('badgeModelo').innerHTML = '<i class="bi bi-cpu"></i> ' + d.modelo;
+}).catch(()=>{});
+</script>
+</body>
+</html>

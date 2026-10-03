@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}LogiSmart{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/style.css') }}?v=2" rel="stylesheet">
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+<header class="header-editorial">
+  <div class="marca">
+    <i class="bi bi-truck"></i>
+    <span>LogiSmart</span>
+  </div>
+  <div class="estado-indicadores">
+    <span class="estado-badge" id="estadoDb"><i class="bi bi-database"></i> …</span>
+    <span class="estado-badge" id="estadoLlm"><i class="bi bi-cpu"></i> …</span>
+  </div>
+</header>
+
+<nav class="dock">
+  <a class="dock-item {{ 'active' if pagina=='dashboard' }}" href="/">
+    <i class="bi bi-speedometer2"></i>
+    <span>Panel</span>
+  </a>
+  <a class="dock-item {{ 'active' if pagina=='acceso' }}" href="/acceso">
+    <i class="bi bi-barrier"></i>
+    <span>Acceso</span>
+  </a>
+  <a class="dock-item {{ 'active' if pagina=='simulador' }}" href="/simulador">
+    <i class="bi bi-toggles"></i>
+    <span>Simulador</span>
+  </a>
+  <span class="dock-separator"></span>
+  <a class="dock-item {{ 'active' if pagina=='incidentes' }}" href="/incidentes">
+    <i class="bi bi-inbox"></i>
+    <span>Incidentes</span>
+  </a>
+  <a class="dock-item {{ 'active' if pagina=='evaluacion' }}" href="/evaluacion">
+    <i class="bi bi-clipboard-data"></i>
+    <span>LLM</span>
+  </a>
+  <a class="dock-item {{ 'active' if pagina=='camiones' }}" href="/camiones">
+    <i class="bi bi-truck-front"></i>
+    <span>Camiones</span>
+  </a>
+  <span class="dock-separator"></span>
+  <a class="dock-item {{ 'active' if pagina=='asistente' }}" href="/asistente">
+    <i class="bi bi-robot"></i>
+    <span>Asistente</span>
+  </a>
+  <a class="dock-item {{ 'active' if pagina=='riesgos' }}" href="/riesgos">
+    <i class="bi bi-shield-exclamation"></i>
+    <span>Riesgos</span>
+  </a>
+  <span class="dock-separator"></span>
+  <a class="dock-item {{ 'active' if pagina=='reportes' }}" href="/reportes">
+    <i class="bi bi-file-earmark-arrow-down"></i>
+    <span>Reportes</span>
+  </a>
+  <a class="dock-item {{ 'active' if pagina=='configuracion' }}" href="/configuracion">
+    <i class="bi bi-gear"></i>
+    <span>Config</span>
+  </a>
+</nav>
+
+<main class="contenido">
+  {% block encabezado %}{% endblock %}
+  {% block contenido %}{% endblock %}
+</main>
+
+<script src="{{ url_for('static', filename='js/app.js') }}?v=2"></script>
+<script>pintarEstadoGlobal();</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

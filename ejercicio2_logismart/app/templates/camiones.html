@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block titulo %}LogiSmart — Camiones{% endblock %}
+{% block encabezado %}<i class="bi bi-truck-front me-1"></i>Registro de camiones{% endblock %}
+
+{% block contenido %}
+<div class="card">
+  <div class="card-header d-flex gap-2 align-items-center">
+    <span class="me-auto"><i class="bi bi-list-ul me-1"></i>Camiones registrados</span>
+    <input id="qPlaca" class="form-control form-control-sm w-auto" placeholder="Buscar placa…">
+    <button class="btn btn-sm btn-primary" id="btnNuevo"><i class="bi bi-plus-lg me-1"></i>Nuevo</button>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover mb-0 align-middle">
+      <thead><tr><th>ID</th><th>Placa</th><th>Empresa</th><th>Autorización</th><th>Certificación</th><th></th></tr></thead>
+      <tbody id="tbCamiones"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Modal alta/edición -->
+<div class="modal fade" id="modalCamion" tabindex="-1">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title" id="tituloModal">Nuevo camión</h5>
+      <button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="cId">
+      <div class="row g-2">
+        <div class="col-6"><label class="form-label">ID (CAM-###)</label><input id="cCamionId" class="form-control" placeholder="CAM-109"></div>
+        <div class="col-6"><label class="form-label">Placa</label><input id="cPlaca" class="form-control" placeholder="ABC-123-D"></div>
+      </div>
+      <div class="mt-2"><label class="form-label">Empresa</label><input id="cEmpresa" class="form-control"></div>
+      <div class="row g-2 mt-1">
+        <div class="col-6 form-check mt-3"><input class="form-check-input" type="checkbox" id="cAut">
+          <label class="form-check-label" for="cAut">Autorización previa</label></div>
+        <div class="col-6 form-check mt-3"><input class="form-check-input" type="checkbox" id="cCert">
+          <label class="form-check-label" for="cCert">Certificación vigente</label></div>
+      </div>
+      <div class="mt-2"><label class="form-label">Días restantes de certificación</label>
+        <input type="number" id="cDias" class="form-control" min="0" max="3650" value="180"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+      <button class="btn btn-primary" id="btnGuardar"><i class="bi bi-save me-1"></i>Guardar</button>
+    </div>
+  </div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const modal = new bootstrap.Modal('#modalCamion');
+let camiones = [];
+
+async function cargar() {
+  const p = qPlaca.value.trim() ? '?placa=' + encodeURIComponent(qPlaca.value.trim()) : '';
+  camiones = await api('/api/camiones' + p);
+  tbCamiones.innerHTML = camiones.map(c => `<tr>
+    <td><b>${esc(c.camion_id)}</b></td><td>${esc(c.placa)}</td><td>${esc(c.empresa)}</td>
+    <td>${c.autorizacion ? '<span class="badge text-bg-success">sí</span>' : '<span class="badge text-bg-danger">no</span>'}</td>
+    <td>${c.certificacion_vigente ? `<span class="badge text-bg-${c.certificacion_dias_restantes < 30 ? 'warning' : 'success'}">${c.certificacion_dias_restantes} días</span>` : '<span class="badge text-bg-danger">vencida</span>'}</td>
+    <td class="text-nowrap">
+      <button class="btn btn-sm btn-outline-primary" onclick="editar('${c._id}')"><i class="bi bi-pencil"></i></button>
+      <button class="btn btn-sm btn-outline-danger" onclick="borrar('${c._id}')"><i class="bi bi-trash"></i></button>
+    </td></tr>`).join('')
+    || '<tr><td colspan="6" class="text-center text-muted">Sin camiones</td></tr>';
+}
+
+btnNuevo.addEventListener('click', () => {
+  tituloModal.textContent = 'Nuevo camión';
+  cId.value = ''; cCamionId.value = ''; cPlaca.value = ''; cEmpresa.value = '';
+  cAut.checked = true; cCert.checked = true; cDias.value = 180;
+  modal.show();
+});
+
+window.editar = (id) => {
+  const c = camiones.find(x => x._id === id);
+  if (!c) return;
+  tituloModal.textContent = 'Editar ' + c.camion_id;
+  cId.value = c._id; cCamionId.value = c.camion_id; cPlaca.value = c.placa; cEmpresa.value = c.empresa;
+  cAut.checked = !!c.autorizacion; cCert.checked = !!c.certificacion_vigente;
+  cDias.value = c.certificacion_dias_restantes ?? 0;
+  modal.show();
+};
+
+window.borrar = async (id) => {
+  if (!confirm('¿Eliminar este camión?')) return;
+  try { await api('/api/camiones/' + id, { method: 'DELETE' }); cargar(); }
+  catch (e) { toast(e.message, 'danger'); }
+};
+
+btnGuardar.addEventListener('click', async () => {
+  const body = { camion_id: cCamionId.value.trim(), placa: cPlaca.value.trim(),
+    empresa: cEmpresa.value.trim(), autorizacion: cAut.checked,
+    certificacion_vigente: cCert.checked,
+    certificacion_dias_restantes: parseInt(cDias.value || '0') };
+  if (!body.camion_id || !body.placa || !body.empresa)
+    return toast('ID, placa y empresa son obligatorios', 'warning');
+  try {
+    const id = cId.value;
+    await api('/api/camiones' + (id ? '/' + id : ''), { method: id ? 'PUT' : 'POST', body });
+    modal.hide(); cargar(); toast('Camión guardado');
+  } catch (e) { toast(e.message + (e.detalle ? ': ' + JSON.stringify(e.detalle) : ''), 'danger'); }
+});
+
+let deb;
+qPlaca.addEventListener('input', () => { clearTimeout(deb); deb = setTimeout(cargar, 300); });
+cargar().catch(e => toast(e.message, 'danger'));
+</script>
+{% endblock %}

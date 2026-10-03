@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block titulo %}LogiSmart — Control de acceso{% endblock %}
+{% block encabezado %}<i class="bi bi-barrier me-1"></i>Control de acceso vehicular{% endblock %}
+
+{% block contenido %}
+<div class="row g-3">
+  <!-- Formulario de evaluación -->
+  <div class="col-lg-5">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-search me-1"></i>1. Buscar camión (opcional)</div>
+      <div class="card-body">
+        <div class="input-group">
+          <input id="qPlaca" class="form-control" placeholder="Placa (ABC-123-D) o id (CAM-102)">
+          <button class="btn btn-outline-primary" id="btnBuscar"><i class="bi bi-search"></i></button>
+        </div>
+        <div id="infoCamion" class="small text-muted mt-2"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><i class="bi bi-toggles me-1"></i>2. Premisas del vehículo</div>
+      <div class="card-body">
+        <div id="premisas" class="vstack gap-3">
+          <div class="form-check form-switch switch-xl"><input class="form-check-input" type="checkbox" id="swP">
+            <label class="form-check-label" for="swP"><b>P</b> — Autorización previa</label></div>
+          <div class="form-check form-switch switch-xl"><input class="form-check-input" type="checkbox" id="swQ">
+            <label class="form-check-label" for="swQ"><b>Q</b> — Peso excede el límite</label></div>
+          <div class="form-check form-switch switch-xl"><input class="form-check-input" type="checkbox" id="swR">
+            <label class="form-check-label" for="swR"><b>R</b> — Materiales peligrosos</label></div>
+          <div class="form-check form-switch switch-xl"><input class="form-check-input" type="checkbox" id="swS">
+            <label class="form-check-label" for="swS"><b>S</b> — Certificación vigente</label></div>
+          <div class="form-check form-switch switch-xl"><input class="form-check-input" type="checkbox" id="swT">
+            <label class="form-check-label" for="swT"><b>T</b> — Horario restringido (mat. peligrosos)</label></div>
+          <div class="form-check form-switch switch-xl"><input class="form-check-input" type="checkbox" id="swV">
+            <label class="form-check-label" for="swV"><b>V</b> — Certificación vence &lt; 30 días</label></div>
+        </div>
+        <hr>
+        <div class="row g-2">
+          <div class="col-6"><input id="fCamion" class="form-control" placeholder="Camión (CAM-###)"></div>
+          <div class="col-6"><input id="fPlaca" class="form-control" placeholder="Placa"></div>
+          <div class="col-8"><input id="fOperador" class="form-control" placeholder="Operador" value="operador"></div>
+          <div class="col-4 form-check mt-2"><input class="form-check-input" type="checkbox" id="swGuardar" checked>
+            <label class="form-check-label" for="swGuardar">Guardar en bitácora</label></div>
+        </div>
+        <button class="btn btn-primary w-100 mt-3" id="btnEvaluar">
+          <i class="bi bi-play-fill me-1"></i>Evaluar reglas
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resultado -->
+  <div class="col-lg-7">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-stoplights me-1"></i>Resultado</div>
+      <div class="card-body text-center" id="resultado">
+        <div class="semaforo my-2">
+          <div class="luz roja" id="luzR"></div>
+          <div class="luz amarilla" id="luzA"></div>
+          <div class="luz verde" id="luzV"></div>
+        </div>
+        <h5 id="txtDecision" class="mt-2 text-muted">Evalúa un camión para ver el resultado</h5>
+        <div id="reglasActivas" class="mb-2"></div>
+      </div>
+      <ul class="list-group list-group-flush pasos-logica" id="listaExplicacion"></ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-journal-text me-1"></i>Bitácora de accesos</span>
+        <button class="btn btn-sm btn-outline-secondary" id="btnRefrescar"><i class="bi bi-arrow-clockwise"></i></button>
+      </div>
+      <div class="table-responsive tabla-scroll">
+        <table class="table table-sm table-hover mb-0 align-middle">
+          <thead><tr><th>Fecha</th><th>Camión</th><th>Decisión</th><th></th></tr></thead>
+          <tbody id="tbBitacora"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal explicación -->
+<div class="modal fade" id="modalExplica" tabindex="-1">
+  <div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title"><i class="bi bi-list-ol me-1"></i>Explicación paso a paso</h5>
+      <button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body"><ol id="modalPasos" class="pasos-logica"></ol></div>
+  </div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const modal = new bootstrap.Modal('#modalExplica');
+const LUCES = { verde: 'luzV', amarillo: 'luzA', rojo: 'luzR' };
+let camionSel = null;
+
+function leerPremisas() {
+  return { P: swP.checked, Q: swQ.checked, R: swR.checked,
+           S: swS.checked, T: swT.checked, V: swV.checked };
+}
+
+function pintarResultado(res) {
+  ['luzR','luzA','luzV'].forEach(id => document.getElementById(id).classList.remove('on'));
+  document.getElementById(LUCES[res.semaforo]).classList.add('on');
+  txtDecision.textContent = res.texto_decision;
+  txtDecision.className = 'mt-2 ' + ({verde:'text-success',amarillo:'text-warning',rojo:'text-danger'}[res.semaforo]);
+  reglasActivas.innerHTML = ['A','E','H','W'].map(r =>
+    `<span class="badge me-1 ${res[r] ? 'text-bg-dark' : 'text-bg-light text-muted'}">${r} ${res[r] ? 'V' : 'F'}</span>`).join('');
+  listaExplicacion.innerHTML = res.explicacion.map(p => `<li class="list-group-item small">${esc(p)}</li>`).join('');
+}
+
+btnEvaluar.addEventListener('click', async () => {
+  spinnerBtn(btnEvaluar, true, 'Evaluando…');
+  try {
+    const body = { ...leerPremisas(),
+      camion_id: fCamion.value || null, placa: fPlaca.value || null,
+      operador: fOperador.value || 'operador', guardar: swGuardar.checked };
+    const res = await api('/api/accesos/evaluar', { method: 'POST', body });
+    pintarResultado(res);
+    if (swGuardar.checked) { cargarBitacora(); toast('Decisión registrada en la bitácora'); }
+  } catch (e) { toast(e.message, 'danger'); }
+  finally { spinnerBtn(btnEvaluar, false); }
+});
+
+btnBuscar.addEventListener('click', async () => {
+  const q = qPlaca.value.trim();
+  if (!q) return toast('Escribe una placa o un id de camión', 'warning');
+  try {
+    let docs = await api('/api/camiones?camion_id=' + encodeURIComponent(q.toUpperCase()));
+    if (!docs.length) docs = await api('/api/camiones?placa=' + encodeURIComponent(q.toUpperCase()));
+    if (!docs.length) { camionSel = null; infoCamion.textContent = 'No se encontró ese camión en el registro.'; return; }
+    camionSel = docs[0];
+    // Precargar premisas desde la ficha del camión
+    swP.checked = !!camionSel.autorizacion;
+    swS.checked = !!camionSel.certificacion_vigente;
+    swV.checked = (camionSel.certificacion_dias_restantes ?? 999) < 30;
+    fCamion.value = camionSel.camion_id; fPlaca.value = camionSel.placa;
+    infoCamion.innerHTML = `<b>${esc(camionSel.camion_id)}</b> · ${esc(camionSel.placa)} · ${esc(camionSel.empresa)} ·
+      certificación: ${camionSel.certificacion_vigente ? 'vigente (' + camionSel.certificacion_dias_restantes + ' días)' : '<b class="text-danger">vencida</b>'} ·
+      autorización: ${camionSel.autorizacion ? 'sí' : '<b class="text-danger">no</b>'}`;
+  } catch (e) { toast(e.message, 'danger'); }
+});
+
+async function cargarBitacora() {
+  const docs = await api('/api/accesos?limite=15');
+  tbBitacora.innerHTML = docs.map(a => `<tr>
+    <td>${fmtFecha(a.timestamp)}</td>
+    <td>${esc(a.camion_id || a.placa || '—')}</td>
+    <td>${badgeDecision(a.decision)}</td>
+    <td><button class="btn btn-sm btn-outline-info" onclick='verPasos(${JSON.stringify(a.explicacion || [])})'>
+      <i class="bi bi-list-ol"></i></button></td></tr>`).join('')
+    || '<tr><td colspan="4" class="text-center text-muted">Sin registros</td></tr>';
+}
+window.verPasos = (pasos) => {
+  modalPasos.innerHTML = pasos.map(p => `<li>${esc(p)}</li>`).join('');
+  modal.show();
+};
+btnRefrescar.addEventListener('click', cargarBitacora);
+cargarBitacora().catch(() => {});
+</script>
+{% endblock %}

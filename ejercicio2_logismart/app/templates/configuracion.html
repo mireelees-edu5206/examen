@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block titulo %}LogiSmart — Configuración{% endblock %}
+{% block encabezado %}<i class="bi bi-gear me-1"></i>Configuración del sistema{% endblock %}
+
+{% block contenido %}
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-database me-1"></i>Persistencia</div>
+      <div class="card-body" id="cardDb">Cargando…</div>
+    </div>
+    <div class="card">
+      <div class="card-header"><i class="bi bi-seed me-1"></i>Datos de demostración</div>
+      <div class="card-body">
+        <p class="small text-muted">Vuelve a poblar camiones, accesos, incidentes y riesgos con los datos demo. La opción "forzar" vacía primero esas colecciones.</p>
+        <button class="btn btn-outline-primary btn-sm" id="btnSeed"><i class="bi bi-cloud-download me-1"></i>Sembrar si está vacío</button>
+        <button class="btn btn-outline-danger btn-sm" id="btnSeedF"><i class="bi bi-arrow-repeat me-1"></i>Resembrar (forzar)</button>
+        <div class="small mt-2" id="seedInfo"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-cpu me-1"></i>Modelo LLM (Ollama)</div>
+      <div class="card-body">
+        <div id="ollamaInfo" class="small mb-2">Cargando…</div>
+        <label class="form-label">Modelo para clasificación y asistente</label>
+        <select id="selModelo" class="form-select"></select>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><i class="bi bi-sliders me-1"></i>Parámetros de operación</div>
+      <div class="card-body">
+        <label class="form-label">Umbral de confianza LLM <span id="lblUmbral" class="badge text-bg-light">0.50</span></label>
+        <input type="range" class="form-range" id="rUmbral" min="0" max="1" step="0.05">
+        <div class="form-check form-switch mt-2">
+          <input class="form-check-input" type="checkbox" id="swSim">
+          <label class="form-check-label" for="swSim">Modo simulación de correo (no enviar SMTP real)</label>
+        </div>
+        <label class="form-label mt-3">Nombre del operador por defecto</label>
+        <input id="fOperador" class="form-control" placeholder="operador">
+        <button class="btn btn-primary mt-3" id="btnGuardar"><i class="bi bi-save me-1"></i>Guardar configuración</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function cargar() {
+  try {
+    const d = await api('/api/estado');
+    cardDb.innerHTML = d.persistencia.conectado
+      ? `<span class="badge text-bg-success"><i class="bi bi-check-circle"></i> MongoDB conectado</span>
+         <div class="small text-muted mt-2">URI: <code>${esc(d.persistencia.uri)}</code></div>`
+      : `<span class="badge text-bg-danger"><i class="bi bi-x-circle"></i> MongoDB no responde</span>
+         <div class="small text-muted mt-2">Trabajando con almacén local de respaldo.<br>Error: ${esc(d.persistencia.error || '')}</div>
+         <button class="btn btn-sm btn-outline-primary mt-2" id="btnRec">Reintentar conexión</button>`;
+    if (!d.persistencia.conectado)
+      document.getElementById('btnRec').onclick = async () => {
+        const r = await api('/api/reconectar', { method: 'POST' });
+        toast(r.conectado ? 'MongoDB conectado' : 'Sigue sin responder', r.conectado ? 'success' : 'warning');
+        cargar(); pintarEstadoGlobal();
+      };
+
+    const cfg = d.config;
+    selModelo.innerHTML = (d.ollama.modelos.length ? d.ollama.modelos : [d.ollama.modelo_actual])
+      .map(m => `<option ${m === d.ollama.modelo_actual ? 'selected' : ''}>${esc(m)}</option>`).join('');
+    ollamaInfo.innerHTML = d.ollama.disponible
+      ? `<span class="badge text-bg-success">Ollama activo</span> ${d.ollama.modelos.length} modelo(s) instalado(s)`
+      : `<span class="badge text-bg-secondary">Ollama no responde</span> el clasificador usará el plan de respaldo por reglas`;
+    rUmbral.value = cfg.umbral_confianza ?? 0.5;
+    lblUmbral.textContent = (+rUmbral.value).toFixed(2);
+    swSim.checked = !!cfg.simulacion_correo;
+    fOperador.value = cfg.operador || 'operador';
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+rUmbral.addEventListener('input', () => lblUmbral.textContent = (+rUmbral.value).toFixed(2));
+
+btnGuardar.addEventListener('click', async () => {
+  try {
+    await api('/api/config', { method: 'PUT', body: {
+      modelo: selModelo.value, umbral_confianza: +rUmbral.value,
+      simulacion_correo: swSim.checked, operador: fOperador.value.trim() || 'operador' } });
+    toast('Configuración guardada'); pintarEstadoGlobal();
+  } catch (e) { toast(e.message, 'danger'); }
+});
+
+btnSeed.addEventListener('click', async () => sembrar(false));
+btnSeedF.addEventListener('click', async () => {
+  if (!confirm('Esto vaciará camiones, accesos, incidentes y riesgos y los volverá a poblar. ¿Continuar?')) return;
+  sembrar(true);
+});
+async function sembrar(forzar) {
+  try {
+    const r = await api('/api/seed' + (forzar ? '?forzar=1' : ''), { method: 'POST' });
+    seedInfo.textContent = 'Sembrado: ' + JSON.stringify(r.sembrado) + ' (motor: ' + r.motor + ')';
+    toast('Datos demo listos');
+  } catch (e) { toast(e.message, 'danger'); }
+}
+cargar();
+</script>
+{% endblock %}

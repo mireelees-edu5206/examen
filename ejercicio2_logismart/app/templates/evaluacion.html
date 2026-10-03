@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block titulo %}LogiSmart — Evaluación del clasificador{% endblock %}
+{% block encabezado %}<i class="bi bi-clipboard-data me-1"></i>Evaluación sobre dataset etiquetado{% endblock %}
+
+{% block contenido %}
+<div class="card mb-3">
+  <div class="card-body d-flex flex-wrap align-items-center gap-3">
+    <div>
+      <b>Experimento:</b> compara reglas, LLM e híbrido sobre los correos etiquetados a mano
+      (exactitud en categoría y prioridad, matriz de confusión y latencia).
+    </div>
+    <div class="ms-auto d-flex align-items-center gap-3">
+      <div class="form-check"><input class="form-check-input" type="checkbox" id="mReglas" checked>
+        <label class="form-check-label" for="mReglas">Reglas</label></div>
+      <div class="form-check"><input class="form-check-input" type="checkbox" id="mLlm" checked>
+        <label class="form-check-label" for="mLlm">LLM</label></div>
+      <div class="form-check"><input class="form-check-input" type="checkbox" id="mHibrido" checked>
+        <label class="form-check-label" for="mHibrido">Híbrido</label></div>
+      <button class="btn btn-primary" id="btnEjecutar"><i class="bi bi-play-fill me-1"></i>Ejecutar</button>
+    </div>
+  </div>
+  <div class="progress mx-3 mb-3" style="height:8px">
+    <div class="progress-bar progress-bar-striped progress-bar-animated" id="barra" style="width:0%"></div>
+  </div>
+</div>
+
+<div id="zonaResultados" style="display:none">
+  <div class="row g-3 mb-3" id="resumenModos"></div>
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <div class="card h-100"><div class="card-header"><i class="bi bi-grid-3x3 me-1"></i>Matriz de confusión (categoría esperada → obtenida)</div>
+        <div class="card-body">
+          <select id="selModo" class="form-select form-select-sm w-auto mb-2"></select>
+          <div class="table-responsive"><table class="table table-sm" id="tbMatriz"></table></div>
+        </div></div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card h-100"><div class="card-header"><i class="bi bi-list-check me-1"></i>Detalle por correo</div>
+        <div class="table-responsive tabla-scroll" style="max-height:420px">
+          <table class="table table-sm mb-0">
+            <thead><tr><th>#</th><th>Esperada</th><th>Obtenida</th><th>Prioridad esp/obt</th><th></th></tr></thead>
+            <tbody id="tbDetalle"></tbody>
+          </table>
+        </div></div>
+    </div>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header d-flex justify-content-between">
+    <span><i class="bi bi-clock-history me-1"></i>Evaluaciones anteriores (colección evaluaciones_llm)</span>
+    <button class="btn btn-sm btn-outline-secondary" id="btnHist"><i class="bi bi-arrow-clockwise"></i></button>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Fecha</th><th>Modo</th><th>Modelo</th><th>Exact. categoría</th><th>Exact. prioridad</th><th>Latencia prom.</th></tr></thead>
+      <tbody id="tbHistorico"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let timer = null, ultimoResultado = null;
+
+btnEjecutar.addEventListener('click', async () => {
+  const modos = [mReglas.checked && 'reglas', mLlm.checked && 'llm', mHibrido.checked && 'hibrido'].filter(Boolean);
+  if (!modos.length) return toast('Selecciona al menos un modo', 'warning');
+  spinnerBtn(btnEjecutar, true, 'Corriendo…');
+  try {
+    await api('/api/evaluacion/ejecutar', { method: 'POST', body: { modos } });
+    timer = setInterval(consultar, 1500);
+  } catch (e) { toast(e.message, 'danger'); spinnerBtn(btnEjecutar, false); }
+});
+
+async function consultar() {
+  const e = await api('/api/evaluacion/estado');
+  const pct = e.total ? Math.round(100 * e.progreso / e.total) : 0;
+  barra.style.width = pct + '%';
+  barra.textContent = pct + '%';
+  if (!e.corriendo) {
+    clearInterval(timer); timer = null;
+    spinnerBtn(btnEjecutar, false);
+    if (e.error) return toast('Error en la evaluación: ' + e.error, 'danger');
+    ultimoResultado = e.resultado;
+    pintarResultados();
+    cargarHistorico();
+    toast('Evaluación terminada');
+  }
+}
+
+function pintarResultados() {
+  const r = ultimoResultado;
+  zonaResultados.style.display = '';
+  resumenModos.innerHTML = r.modos.map(m => {
+    const x = r.resultados[m];
+    return `<div class="col-md-4"><div class="card kpi-card"><div class="card-body">
+      <h6 class="text-uppercase text-muted">${m}</h6>
+      <div class="d-flex justify-content-between"><span>Exact. categoría</span><b>${(x.exactitud_categoria*100).toFixed(1)}%</b></div>
+      <div class="d-flex justify-content-between"><span>Exact. prioridad</span><b>${(x.exactitud_prioridad*100).toFixed(1)}%</b></div>
+      <div class="d-flex justify-content-between"><span>Latencia media</span><b>${x.latencia_promedio_ms} ms</b></div>
+    </div></div></div>`;
+  }).join('');
+  selModo.innerHTML = r.modos.map(m => `<option>${m}</option>`).join('');
+  selModo.onchange = () => pintarMatriz(selModo.value);
+  pintarMatriz(r.modos[0]);
+}
+
+function pintarMatriz(modo) {
+  const r = ultimoResultado.resultados[modo];
+  const mat = r.matriz_confusion;
+  const filas = Object.entries(mat).sort((a,b) => b[1]-a[1]);
+  tbMatriz.innerHTML = `<thead><tr><th>esperada → obtenida</th><th class="text-end">n</th></tr></thead>` +
+    filas.map(([k, v]) => {
+      const ok = k.split(' -> ')[0] === k.split(' -> ')[1];
+      return `<tr class="${ok ? '' : 'table-warning'}"><td>${esc(k)}</td><td class="text-end">${v}</td></tr>`;
+    }).join('');
+  tbDetalle.innerHTML = r.detalle.map(d =>
+    `<tr class="${d.correcto ? '' : 'table-warning'}"><td>${d.id}</td><td>${esc(d.esperada)}</td>
+     <td>${esc(d.obtenida)}</td><td class="small">${esc(d.prioridad_esperada)} / ${esc(d.prioridad_obtenida)}</td>
+     <td>${d.correcto ? '<i class="bi bi-check text-success"></i>' : '<i class="bi bi-x text-danger"></i>'}</td></tr>`).join('');
+}
+
+async function cargarHistorico() {
+  try {
+    const docs = await api('/api/evaluacion/historico');
+    tbHistorico.innerHTML = docs.map(d => `<tr>
+      <td class="small">${fmtFecha(d.timestamp)}</td><td>${esc(d.modo)}</td><td>${esc(d.modelo)}</td>
+      <td>${(100 * (d.respuesta?.exactitud_categoria ?? d.coincidio_reglas ?? 0)).toFixed(1)}%</td>
+      <td>${(100 * (d.respuesta?.exactitud_prioridad ?? 0)).toFixed(1)}%</td>
+      <td>${d.latencia} ms</td></tr>`).join('')
+      || '<tr><td colspan="6" class="text-center text-muted">Aún no hay evaluaciones guardadas</td></tr>';
+  } catch (e) {}
+}
+btnHist.addEventListener('click', cargarHistorico);
+cargarHistorico();
+</script>
+{% endblock %}
